@@ -1,0 +1,680 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Zero Trust 6G — Federated Anomaly Detection</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg:#030812;--surface:#070f1e;--border:#0d2340;--accent:#00d4ff;--accent2:#00ffb3;
+    --warn:#ffb300;--danger:#ff3d5a;--grant:#00ffb3;--restrict:#ffb300;--deny:#ff3d5a;
+    --text:#c8dff5;--muted:#3d6080;--mono:'Share Tech Mono',monospace;--sans:'Syne',sans-serif;
+    --glow:0 0 18px rgba(0,212,255,.35);--glow2:0 0 24px rgba(0,255,179,.3);
+  }
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+  body{background:var(--bg);color:var(--text);font-family:var(--mono);min-height:100vh;overflow-x:hidden;}
+  body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:9999;
+    background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,.06) 2px,rgba(0,0,0,.06) 4px);}
+  .grid-bg{position:fixed;inset:0;pointer-events:none;z-index:0;
+    background-image:linear-gradient(rgba(0,212,255,.04) 1px,transparent 1px),linear-gradient(90deg,rgba(0,212,255,.04) 1px,transparent 1px);
+    background-size:40px 40px;animation:gridDrift 20s linear infinite;}
+  @keyframes gridDrift{from{background-position:0 0;}to{background-position:40px 40px;}}
+  .wrapper{position:relative;z-index:1;max-width:1400px;margin:0 auto;padding:0 24px 80px;}
+
+  /* HEADER */
+  header{padding:40px 0 32px;border-bottom:1px solid var(--border);display:flex;align-items:flex-start;justify-content:space-between;gap:24px;flex-wrap:wrap;}
+  .logo-block{display:flex;align-items:center;gap:16px;}
+  .logo-icon{width:52px;height:52px;border:2px solid var(--accent);border-radius:12px;display:flex;align-items:center;justify-content:center;box-shadow:var(--glow);animation:iconPulse 3s ease-in-out infinite;}
+  @keyframes iconPulse{0%,100%{box-shadow:var(--glow);}50%{box-shadow:0 0 32px rgba(0,212,255,.7);}}
+  .logo-icon svg{width:28px;height:28px;}
+  .logo-text h1{font-family:var(--sans);font-size:1.35rem;font-weight:800;letter-spacing:.04em;color:#fff;line-height:1.2;}
+  .logo-text p{font-size:.72rem;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;margin-top:2px;}
+  .status-bar{display:flex;align-items:center;gap:10px;font-size:.75rem;}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--accent2);animation:blink 1.4s ease infinite;}
+  @keyframes blink{0%,100%{opacity:1;}50%{opacity:.2;}}
+  .status-text{color:var(--accent2);letter-spacing:.08em;text-transform:uppercase;}
+
+  /* CONTROLS */
+  .controls{display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding:28px 0 24px;border-bottom:1px solid var(--border);}
+  .ctrl-label{font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;}
+  .node-select{background:var(--surface);border:1px solid var(--border);color:var(--accent);font-family:var(--mono);font-size:.85rem;padding:8px 16px;border-radius:6px;cursor:pointer;outline:none;transition:border-color .2s;}
+  .node-select:hover{border-color:var(--accent);}
+  .btn{background:transparent;border:1px solid var(--accent);color:var(--accent);font-family:var(--mono);font-size:.85rem;letter-spacing:.1em;padding:10px 28px;border-radius:6px;cursor:pointer;position:relative;overflow:hidden;transition:all .2s;text-transform:uppercase;}
+  .btn::before{content:'';position:absolute;inset:0;background:var(--accent);opacity:0;transition:opacity .2s;}
+  .btn:hover::before{opacity:.1;}.btn:hover{box-shadow:var(--glow);}.btn:active{transform:scale(.97);}.btn:disabled{opacity:.4;cursor:not-allowed;}
+  .btn-primary{border-color:var(--accent2);color:var(--accent2);}.btn-primary::before{background:var(--accent2);}.btn-primary:hover{box-shadow:var(--glow2);}
+
+  /* KPI */
+  .kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;padding:28px 0;}
+  .kpi-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px;position:relative;overflow:hidden;transition:border-color .3s,transform .3s;}
+  .kpi-card::after{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,var(--accent),transparent);transform:scaleX(0);transition:transform .4s;}
+  .kpi-card:hover{border-color:var(--accent);transform:translateY(-2px);}.kpi-card:hover::after{transform:scaleX(1);}
+  .kpi-label{font-size:.65rem;color:var(--muted);text-transform:uppercase;letter-spacing:.12em;margin-bottom:8px;}
+  .kpi-value{font-family:var(--sans);font-size:2rem;font-weight:800;color:#fff;line-height:1;}
+  .kpi-value.accent{color:var(--accent);}.kpi-value.accent2{color:var(--accent2);}.kpi-value.danger{color:var(--danger);}
+  .kpi-sub{font-size:.68rem;color:var(--muted);margin-top:6px;}
+
+  /* LAYOUT */
+  .main-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:4px;}
+  @media(max-width:900px){.main-grid{grid-template-columns:1fr;}}
+  .panel{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:24px;}
+  .panel.full{grid-column:1/-1;}
+  .panel-title{font-family:var(--sans);font-size:.9rem;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.1em;display:flex;align-items:center;gap:8px;margin-bottom:20px;padding-bottom:14px;border-bottom:1px solid var(--border);}
+  .panel-title .tag{background:rgba(0,212,255,.08);border:1px solid rgba(0,212,255,.2);font-size:.6rem;padding:2px 8px;border-radius:4px;color:var(--accent);}
+
+  /* NODE CARDS */
+  .nodes-grid{display:flex;flex-direction:column;gap:14px;}
+  .node-card{background:rgba(0,212,255,.03);border:1px solid var(--border);border-radius:8px;padding:16px;transition:border-color .2s;}
+  .node-card:hover{border-color:rgba(0,212,255,.3);}
+  .node-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;}
+  .node-id{font-family:var(--sans);font-weight:700;font-size:.9rem;color:#fff;}
+  .node-badge{font-size:.65rem;padding:3px 10px;border-radius:20px;text-transform:uppercase;letter-spacing:.08em;background:rgba(0,255,179,.1);border:1px solid rgba(0,255,179,.3);color:var(--accent2);}
+  .node-stats{display:flex;gap:20px;flex-wrap:wrap;margin-bottom:12px;}
+  .stat{font-size:.72rem;}.stat span{color:var(--muted);}.stat strong{color:var(--text);}
+  .decisions{display:flex;flex-direction:column;gap:4px;margin-top:8px;}
+  .decision-row{display:grid;grid-template-columns:70px 1fr 64px 108px;font-size:.68rem;gap:8px;align-items:center;padding:5px 8px;border-radius:4px;background:rgba(255,255,255,.02);}
+  .trust-bar-wrap{background:rgba(255,255,255,.05);border-radius:3px;height:5px;overflow:hidden;}
+  .trust-bar{height:100%;border-radius:3px;transition:width .8s ease;}
+  .badge-grant{color:var(--grant);background:rgba(0,255,179,.1);border:1px solid rgba(0,255,179,.2);padding:2px 8px;border-radius:20px;font-size:.62rem;text-align:center;}
+  .badge-restrict{color:var(--restrict);background:rgba(255,179,0,.1);border:1px solid rgba(255,179,0,.2);padding:2px 8px;border-radius:20px;font-size:.62rem;text-align:center;}
+  .badge-deny{color:var(--danger);background:rgba(255,61,90,.1);border:1px solid rgba(255,61,90,.2);padding:2px 8px;border-radius:20px;font-size:.62rem;text-align:center;}
+
+  /* CHARTS */
+  .chart-wrap{position:relative;height:240px;}
+
+  /* EVALUATOR */
+  .evaluator-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;}
+  @media(max-width:600px){.evaluator-grid{grid-template-columns:1fr;}}
+  .slider-group{display:flex;flex-direction:column;gap:6px;margin-bottom:16px;}
+  .slider-group label{font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;}
+  .slider-group .val{font-size:1.1rem;color:var(--accent);font-family:var(--sans);font-weight:700;}
+  input[type=range]{width:100%;accent-color:var(--accent);cursor:pointer;background:transparent;}
+  .trust-meter{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:20px;background:rgba(0,0,0,.3);border:1px solid var(--border);border-radius:10px;}
+  .trust-ring{position:relative;width:120px;height:120px;}
+  .trust-ring svg{transform:rotate(-90deg);}
+  .trust-ring .ring-track{fill:none;stroke:rgba(255,255,255,.08);stroke-width:8;}
+  .trust-ring .ring-fill{fill:none;stroke-width:8;stroke-linecap:round;transition:stroke-dashoffset .5s ease,stroke .4s;}
+  .ring-label{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;}
+  .ring-score{font-family:var(--sans);font-size:1.5rem;font-weight:800;}
+  .ring-sub{font-size:.62rem;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;}
+  .decision-badge-big{padding:8px 24px;border-radius:8px;font-family:var(--sans);font-weight:700;font-size:.95rem;letter-spacing:.1em;text-transform:uppercase;transition:all .3s;}
+
+  /* ARCH */
+  .arch-flow{display:flex;align-items:center;justify-content:center;gap:0;flex-wrap:wrap;}
+  .arch-node{display:flex;flex-direction:column;align-items:center;gap:8px;padding:18px 16px;min-width:110px;}
+  .arch-icon{width:52px;height:52px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:1.4rem;border:1px solid var(--border);background:rgba(0,212,255,.05);}
+  .arch-name{font-size:.68rem;color:var(--muted);text-align:center;text-transform:uppercase;letter-spacing:.08em;}
+  .arch-arrow{color:var(--border);font-size:1.2rem;padding:0 4px;}
+
+  /* LOADER */
+  .loading-overlay{display:none;position:absolute;inset:0;background:rgba(3,8,18,.85);border-radius:12px;align-items:center;justify-content:center;flex-direction:column;gap:16px;z-index:10;}
+  .loading-overlay.active{display:flex;}
+  .spinner{width:36px;height:36px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+  .loading-text{font-size:.78rem;color:var(--accent);letter-spacing:.1em;text-transform:uppercase;}
+  .empty-state{text-align:center;color:var(--muted);font-size:.8rem;padding:40px 0;}
+
+  /* TERMINAL */
+  .terminal{background:#020810;border:1px solid var(--border);border-radius:8px;padding:16px;height:180px;overflow-y:auto;font-size:.7rem;line-height:1.7;}
+  .terminal::-webkit-scrollbar{width:4px;}.terminal::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
+  .log-line{color:var(--text);}.log-line.ok{color:var(--grant);}.log-line.warn{color:var(--warn);}.log-line.err{color:var(--danger);}.log-line.dim{color:var(--muted);}
+  .log-line::before{content:'>';margin-right:6px;color:var(--accent);}
+
+  /* CONNECTION INDICATOR */
+  .connection-status {
+    padding: 4px 12px;
+    border-radius: 16px;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .connection-status.connected {
+    background: rgba(0, 255, 179, 0.1);
+    border: 1px solid rgba(0, 255, 179, 0.3);
+    color: var(--accent2);
+  }
+  .connection-status.disconnected {
+    background: rgba(255, 179, 0, 0.1);
+    border: 1px solid rgba(255, 179, 0, 0.3);
+    color: var(--warn);
+  }
+</style>
+</head>
+<body>
+<div class="grid-bg"></div>
+<div class="wrapper">
+  <header>
+    <div class="logo-block">
+      <div class="logo-icon">
+        <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path d="M12 2L2 7v10c0 5.5 3.8 9.7 10 11 6.2-1.3 10-5.5 10-11V7L12 2z"/>
+          <circle cx="12" cy="12" r="3"/>
+        </svg>
+      </div>
+      <div class="logo-text">
+        <h1>ZERO TRUST 6G</h1>
+        <p>Federated Anomaly Detection</p>
+      </div>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 8px; align-items: flex-end;">
+      <div class="status-bar">
+        <div class="dot"></div>
+        <span class="status-text" id="sysStatus">System Ready</span>
+      </div>
+      <div class="connection-status disconnected" id="connectionStatus">
+        <span>⚠</span>
+        <span>Backend Offline</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Controls -->
+  <div class="controls">
+    <span class="ctrl-label">Edge Nodes:</span>
+    <select class="node-select" id="nodeCount">
+      <option value="3">3 Nodes</option>
+      <option value="5">5 Nodes</option>
+      <option value="7">7 Nodes</option>
+      <option value="10">10 Nodes</option>
+    </select>
+    <button class="btn btn-primary" onclick="runSimulation()" id="simBtn">▶ Run Simulation</button>
+    <button class="btn" onclick="resetDash()">Reset Dashboard</button>
+  </div>
+
+  <!-- KPI Cards -->
+  <div class="kpi-grid">
+    <div class="kpi-card">
+      <div class="kpi-label">Total Samples</div>
+      <div class="kpi-value accent" id="kpiSamples">—</div>
+      <div class="kpi-sub">Across all nodes</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Anomalies Detected</div>
+      <div class="kpi-value danger" id="kpiAnomalies">—</div>
+      <div class="kpi-sub">Flagged by IF</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Avg Trust Score</div>
+      <div class="kpi-value accent2" id="kpiTrust">—</div>
+      <div class="kpi-sub">Hybrid metric</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Active Nodes</div>
+      <div class="kpi-value" id="kpiNodes">—</div>
+      <div class="kpi-sub">Federated network</div>
+    </div>
+  </div>
+
+  <!-- Main Grid -->
+  <div class="main-grid">
+    <!-- Node Results -->
+    <div class="panel">
+      <div class="panel-title">
+        <span>⚙ Edge Node Results</span>
+        <span class="tag">Local Training</span>
+      </div>
+      <div style="position:relative;">
+        <div class="loading-overlay" id="nodesLoading"><div class="spinner"></div><div class="loading-text">Training Nodes...</div></div>
+        <div class="nodes-grid" id="nodesContainer">
+          <div class="empty-state">Run simulation to see node results</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Decisions Table -->
+    <div class="panel">
+      <div class="panel-title">
+        <span>📊 Access Decisions</span>
+        <span class="tag">Per Sample</span>
+      </div>
+      <div id="decisionsTable">
+        <div class="empty-state">Run simulation to see decisions</div>
+      </div>
+    </div>
+
+    <!-- MSE Distribution -->
+    <div class="panel">
+      <div class="panel-title">
+        <span>📈 MSE Distribution</span>
+        <span class="tag">Global Model</span>
+      </div>
+      <div style="position:relative;">
+        <div class="loading-overlay" id="chartLoading"><div class="spinner"></div><div class="loading-text">Aggregating...</div></div>
+        <div class="chart-wrap"><canvas id="mseChart"></canvas></div>
+      </div>
+    </div>
+
+    <!-- Trust Evolution -->
+    <div class="panel">
+      <div class="panel-title">
+        <span>📉 Trust Evolution</span>
+        <span class="tag">Per Node</span>
+      </div>
+      <div class="chart-wrap"><canvas id="trustChart"></canvas></div>
+    </div>
+
+    <!-- Live Evaluator -->
+    <div class="panel full">
+      <div class="panel-title">
+        <span>🎯 Live Trust Evaluator</span>
+        <span class="tag">Interactive</span>
+      </div>
+      <div class="evaluator-grid">
+        <div>
+          <div class="slider-group">
+            <label>Autoencoder MSE</label>
+            <div class="val" id="aeMseVal">0.050</div>
+            <input type="range" min="0" max="0.5" step="0.001" value="0.05" id="aeMseSlider" oninput="updateTrustEval()">
+          </div>
+          <div class="slider-group">
+            <label>Isolation Forest Score</label>
+            <div class="val" id="ifScoreVal">0.100</div>
+            <input type="range" min="-0.5" max="0.5" step="0.01" value="0.1" id="ifScoreSlider" oninput="updateTrustEval()">
+          </div>
+        </div>
+        <div class="trust-meter">
+          <div class="trust-ring">
+            <svg width="120" height="120">
+              <circle class="ring-track" cx="60" cy="60" r="52"/>
+              <circle class="ring-fill" id="ringFill" cx="60" cy="60" r="52" stroke="#00ffb3" 
+                stroke-dasharray="326.7" stroke-dashoffset="326.7"/>
+            </svg>
+            <div class="ring-label">
+              <div class="ring-score" id="ringScore">0.75</div>
+              <div class="ring-sub">Trust</div>
+            </div>
+          </div>
+          <div class="decision-badge-big" id="decisionBadge">GRANT</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Architecture -->
+    <div class="panel full">
+      <div class="panel-title">
+        <span>🏗 System Architecture</span>
+        <span class="tag">Overview</span>
+      </div>
+      <div class="arch-flow">
+        <div class="arch-node"><div class="arch-icon">📱</div><div class="arch-name">Edge Devices</div></div>
+        <div class="arch-arrow">→</div>
+        <div class="arch-node"><div class="arch-icon">🔐</div><div class="arch-name">Zero Trust Layer</div></div>
+        <div class="arch-arrow">→</div>
+        <div class="arch-node"><div class="arch-icon">🧠</div><div class="arch-name">ML Model (IF+AE)</div></div>
+        <div class="arch-arrow">→</div>
+        <div class="arch-node"><div class="arch-icon">⚖</div><div class="arch-name">Decision Engine</div></div>
+        <div class="arch-arrow">→</div>
+        <div class="arch-node"><div class="arch-icon">✓</div><div class="arch-name">Access Control</div></div>
+      </div>
+    </div>
+
+    <!-- Terminal -->
+    <div class="panel full">
+      <div class="panel-title">
+        <span>💻 System Terminal</span>
+        <span class="tag">Event Log</span>
+      </div>
+      <div class="terminal" id="terminal">
+        <p class="log-line dim">> System initialized. Awaiting simulation...</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════════════
+// CONFIGURATION
+// ═══════════════════════════════════════════════════════════════════════════
+
+const API_BASE = 'http://localhost:8000';
+let backendConnected = false;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CONNECTION CHECK
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function checkBackendConnection() {
+  try {
+    const response = await fetch(`${API_BASE}/health`, { 
+      method: 'GET',
+      signal: AbortSignal.timeout(2000)
+    });
+    if (response.ok) {
+      backendConnected = true;
+      updateConnectionStatus(true);
+      return true;
+    }
+  } catch (err) {
+    backendConnected = false;
+    updateConnectionStatus(false);
+    return false;
+  }
+  return false;
+}
+
+function updateConnectionStatus(connected) {
+  const statusEl = document.getElementById('connectionStatus');
+  if (connected) {
+    statusEl.className = 'connection-status connected';
+    statusEl.innerHTML = '<span>✓</span><span>Backend Online</span>';
+  } else {
+    statusEl.className = 'connection-status disconnected';
+    statusEl.innerHTML = '<span>⚠</span><span>Backend Offline</span>';
+  }
+}
+
+// Check connection on load and every 10 seconds
+checkBackendConnection();
+setInterval(checkBackendConnection, 10000);
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CHART INSTANCES
+// ═══════════════════════════════════════════════════════════════════════════
+
+let mseChartInst = null;
+let trustChartInst = null;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LOGGING UTILITY
+// ═══════════════════════════════════════════════════════════════════════════
+
+function log(msg, type='dim') {
+  const terminal = document.getElementById('terminal');
+  const line = document.createElement('p');
+  line.className = `log-line ${type}`;
+  line.textContent = msg;
+  terminal.appendChild(line);
+  terminal.scrollTop = terminal.scrollHeight;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// RENDER FUNCTIONS
+// ═══════════════════════════════════════════════════════════════════════════
+
+function renderNodes(nodes) {
+  const container = document.getElementById('nodesContainer');
+  container.innerHTML = nodes.map(n => `
+    <div class="node-card">
+      <div class="node-header">
+        <div class="node-id">Node ${n.node_id}</div>
+        <div class="node-badge">Active</div>
+      </div>
+      <div class="node-stats">
+        <div class="stat"><span>Samples:</span> <strong>${n.samples_trained}</strong></div>
+        <div class="stat"><span>Anomalies:</span> <strong>${n.anomalies_detected}</strong></div>
+        <div class="stat"><span>Avg IF Score:</span> <strong>${n.avg_if_score}</strong></div>
+      </div>
+    </div>
+  `).join('');
+}
+
+function renderDecisionsTable(nodes) {
+  const allDecisions = nodes.flatMap(n => 
+    n.decisions.map(d => ({...d, node_id: n.node_id}))
+  );
+  
+  const container = document.getElementById('decisionsTable');
+  container.innerHTML = `
+    <div class="decisions">
+      ${allDecisions.map(d => {
+        const badgeClass = d.decision === 'GRANT' ? 'badge-grant' : 
+                          d.decision === 'RESTRICT' ? 'badge-restrict' : 'badge-deny';
+        const barColor = d.decision === 'GRANT' ? '#00ffb3' : 
+                        d.decision === 'RESTRICT' ? '#ffb300' : '#ff3d5a';
+        const barWidth = d.trust_score * 100;
+        
+        return `
+          <div class="decision-row">
+            <div style="color:var(--muted);">N${d.node_id}·S${d.sample}</div>
+            <div class="trust-bar-wrap">
+              <div class="trust-bar" style="width:${barWidth}%;background:${barColor};"></div>
+            </div>
+            <div style="color:var(--text);">${d.trust_score}</div>
+            <div class="${badgeClass}">${d.decision}</div>
+          </div>
+        `;
+      }).join('')}
+    </div>
+  `;
+}
+
+function renderMSEChart(mseData) {
+  const ctx = document.getElementById('mseChart');
+  if (mseChartInst) mseChartInst.destroy();
+  
+  mseChartInst = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: mseData.bins,
+      datasets: [{
+        label: 'Frequency',
+        data: mseData.counts,
+        backgroundColor: 'rgba(0,212,255,0.6)',
+        borderColor: 'rgba(0,212,255,1)',
+        borderWidth: 1
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: 'rgba(7,15,30,0.95)',
+          titleColor: '#00d4ff',
+          bodyColor: '#c8dff5'
+        }
+      },
+      scales: {
+        x: {
+          title: { display: true, text: 'MSE Value', color: '#3d6080' },
+          ticks: { color: '#3d6080', maxTicksLimit: 10 },
+          grid: { color: 'rgba(13,35,64,0.3)' }
+        },
+        y: {
+          title: { display: true, text: 'Count', color: '#3d6080' },
+          ticks: { color: '#3d6080' },
+          grid: { color: 'rgba(13,35,64,0.3)' }
+        }
+      }
+    }
+  });
+}
+
+function renderTrustChart(nodes) {
+  const ctx = document.getElementById('trustChart');
+  if (trustChartInst) trustChartInst.destroy();
+  
+  const datasets = nodes.map((n, idx) => ({
+    label: `Node ${n.node_id}`,
+    data: n.decisions.map(d => d.trust_score),
+    borderColor: `hsl(${idx * 60}, 70%, 60%)`,
+    backgroundColor: `hsla(${idx * 60}, 70%, 60%, 0.1)`,
+    borderWidth: 2,
+    tension: 0.4
+  }));
+  
+  trustChartInst = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: nodes[0].decisions.map(d => `S${d.sample}`),
+      datasets
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          display: true,
+          labels: { color: '#c8dff5', boxWidth: 12 }
+        },
+        tooltip: {
+          backgroundColor: 'rgba(7,15,30,0.95)',
+          titleColor: '#00d4ff',
+          bodyColor: '#c8dff5'
+        }
+      },
+      scales: {
+        x: {
+          title: { display: true, text: 'Sample', color: '#3d6080' },
+          ticks: { color: '#3d6080' },
+          grid: { color: 'rgba(13,35,64,0.3)' }
+        },
+        y: {
+          title: { display: true, text: 'Trust Score', color: '#3d6080' },
+          ticks: { color: '#3d6080' },
+          grid: { color: 'rgba(13,35,64,0.3)' },
+          min: 0,
+          max: 1
+        }
+      }
+    }
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LIVE TRUST EVALUATOR
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function updateTrustEval() {
+  const mse = parseFloat(document.getElementById('aeMseSlider').value);
+  const ifScore = parseFloat(document.getElementById('ifScoreSlider').value);
+  
+  document.getElementById('aeMseVal').textContent = mse.toFixed(3);
+  document.getElementById('ifScoreVal').textContent = ifScore.toFixed(3);
+  
+  try {
+    if (backendConnected) {
+      const res = await fetch(`${API_BASE}/api/trust_eval?ae_mse=${mse}&if_score=${ifScore}`);
+      const data = await res.json();
+      displayTrustResult(data.trust_score, data.decision);
+    } else {
+      // Calculate locally using same formula as backend
+      const ifTrust = Math.min(1, Math.max(0, ifScore + 0.5));
+      const aeTrust = Math.exp(-mse * 10);
+      const trust = parseFloat((0.5 * aeTrust + 0.5 * ifTrust).toFixed(4));
+      const decision = trust > 0.80 ? 'GRANT' : trust > 0.50 ? 'RESTRICT' : 'DENY';
+      displayTrustResult(trust, decision);
+    }
+  } catch (err) {
+    // Fallback to local calculation
+    const ifTrust = Math.min(1, Math.max(0, ifScore + 0.5));
+    const aeTrust = Math.exp(-mse * 10);
+    const trust = parseFloat((0.5 * aeTrust + 0.5 * ifTrust).toFixed(4));
+    const decision = trust > 0.80 ? 'GRANT' : trust > 0.50 ? 'RESTRICT' : 'DENY';
+    displayTrustResult(trust, decision);
+  }
+}
+
+function displayTrustResult(trust, decision) {
+  const scoreEl = document.getElementById('ringScore');
+  const badgeEl = document.getElementById('decisionBadge');
+  const ringEl = document.getElementById('ringFill');
+  
+  scoreEl.textContent = trust.toFixed(2);
+  badgeEl.textContent = decision;
+  
+  // Update ring (circumference = 2πr = 326.7)
+  const offset = 326.7 * (1 - trust);
+  ringEl.style.strokeDashoffset = offset;
+  
+  // Update colors
+  if (decision === 'GRANT') {
+    ringEl.style.stroke = '#00ffb3';
+    badgeEl.style.cssText = 'background:rgba(0,255,179,.15);border:1px solid var(--grant);color:var(--grant);';
+  } else if (decision === 'RESTRICT') {
+    ringEl.style.stroke = '#ffb300';
+    badgeEl.style.cssText = 'background:rgba(255,179,0,.15);border:1px solid var(--warn);color:var(--warn);';
+  } else {
+    ringEl.style.stroke = '#ff3d5a';
+    badgeEl.style.cssText = 'background:rgba(255,61,90,.15);border:1px solid var(--danger);color:var(--danger);';
+  }
+}
+
+// Initialize evaluator
+updateTrustEval();
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MAIN SIMULATION
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function runSimulation() {
+  const btn = document.getElementById('simBtn');
+  const numNodes = parseInt(document.getElementById('nodeCount').value);
+  
+  btn.disabled = true;
+  document.getElementById('nodesLoading').classList.add('active');
+  document.getElementById('chartLoading').classList.add('active');
+  document.getElementById('sysStatus').textContent = 'Running Simulation...';
+  
+  log(`Initializing federated simulation with ${numNodes} edge nodes...`, 'dim');
+  
+  try {
+    // Check connection first
+    const isConnected = await checkBackendConnection();
+    
+    if (!isConnected) {
+      throw new Error('Backend not available');
+    }
+    
+    const res = await fetch(`${API_BASE}/api/simulate?num_nodes=${numNodes}`, {
+      signal: AbortSignal.timeout(10000)
+    });
+    
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    
+    const data = await res.json();
+    
+    // Update KPIs
+    document.getElementById('kpiSamples').textContent = data.total_samples.toLocaleString();
+    document.getElementById('kpiAnomalies').textContent = data.total_anomalies;
+    document.getElementById('kpiTrust').textContent = data.avg_trust_score.toFixed(3);
+    document.getElementById('kpiNodes').textContent = data.num_nodes;
+    
+    // Render visualizations
+    renderNodes(data.nodes);
+    
+    // Log decisions
+    data.nodes.forEach(n => n.decisions.forEach(d => {
+      const icon = d.decision === 'GRANT' ? '✓' : d.decision === 'RESTRICT' ? '⚠' : '✕';
+      const type = d.decision === 'GRANT' ? 'ok' : d.decision === 'RESTRICT' ? 'warn' : 'err';
+      log(`Node ${n.node_id} · Sample ${d.sample}: trust=${d.trust_score} → ${icon} ${d.decision}`, type);
+    }));
+    
+    renderMSEChart(data.mse_distribution);
+    renderTrustChart(data.nodes);
+    renderDecisionsTable(data.nodes);
+    
+    log('Federated aggregation complete. Global model ready.', 'ok');
+    document.getElementById('sysStatus').textContent = 'Simulation Complete';
+    
+  } catch (err) {
+    log(`Backend error: ${err.message}`, 'err');
+    log('The backend must be running. Start it with:', 'warn');
+    log('uvicorn app:app --reload --port 8000', 'dim');
+  } finally {
+    btn.disabled = false;
+    document.getElementById('nodesLoading').classList.remove('active');
+    document.getElementById('chartLoading').classList.remove('active');
+  }
+}
+
+function resetDash() {
+  ['kpiSamples', 'kpiAnomalies', 'kpiTrust', 'kpiNodes'].forEach(id => 
+    document.getElementById(id).textContent = '—'
+  );
+  document.getElementById('nodesContainer').innerHTML = '<div class="empty-state">Run simulation to see node results</div>';
+  document.getElementById('decisionsTable').innerHTML = '<div class="empty-state">Run simulation to see decisions</div>';
+  if (mseChartInst) { mseChartInst.destroy(); mseChartInst = null; }
+  if (trustChartInst) { trustChartInst.destroy(); trustChartInst = null; }
+  document.getElementById('terminal').innerHTML = '<p class="log-line dim">> Dashboard reset. Ready.</p>';
+  document.getElementById('sysStatus').textContent = 'System Ready';
+}
+</script>
+</body>
+</html>
